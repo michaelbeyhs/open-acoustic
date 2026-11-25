@@ -21,7 +21,8 @@ See `verify.html` for the current, item-by-item status. In short:
   - live set/read of menu parameters;
   - Mix and Setup pages;
   - preset name;
-  - the Harmony FX page layout.
+  - the Harmony FX page layout;
+  - *Presets and backup*: the list of all stored presets with names, and backups of all presets and of the settings as `.syx` files (read only; the pedal stays on its preset). Restoring isn't built in.
 - **Not mapped:**
   - preset up/down footswitches;
   - STORE, FAVORITE, GENRE;

@@ -20,12 +20,12 @@ The DSP checks each command's payload length against its table: the bytes after 
 | Cmd | Payload | Direction | Purpose | Confidence |
 |---|---|---|---|---|
 | `13` | 104 | both | **Setup packet.** `01 2A <chunk 0–6> <25 params × 4 bytes> <sum>`. Seven packets make the global setup block. The device answers `34` (ack) and shows "SYSEX SETUP ACCEPTED/REJECTED". | confirmed |
-| `15` | 1 | → dev | **Request setup** (`15 00`). The device replies with 7 `13` packets. | confirmed |
+| `15` | 1 | → dev | **Request setup** (`15 00`). The device replies with 7 `13` packets, also without a `57` sync session. | confirmed |
 | `20` | 24 | both | **Preset header** (`hi lo 01 fmtVersion …`). Starts a preset transfer; "SYSEX PRESET REJECTED" on error. | code + editor |
 | `21` | 102 | both | **Preset data packet** (5 per preset, numbered). | code + editor |
 | `22` | 6 | both | **Set parameter:** `p1 p0 v3 v2 v1 v0`. Calls the central setter (same as the Control knob). Also the **reply** to `47`. IDs 0x000–0x3B3; 79 blocked by the firmware (0x95–0x98, 0x26D–0x26E, 0x2D2–0x2EA, 0x304–0x30B, 0x36C–0x392, 0x3B3). | **confirmed** (HIT, LOOP LEVEL, Mix GUITAR) |
 | `47` | 2 | → dev | **Get parameter:** `p1 p0`. Reply: `22 p1 p0 v3 v2 v1 v0`. | **confirmed** |
-| `45` | 2 | → dev | **Request preset** `bank num` (editor: `makeRequestPreset`). `45 00 00` = current preset: reply is header `20` (with the name) + data packets `21`. | **confirmed** (name read) |
+| `45` | 2 | → dev | **Request preset** `bank num` (editor: `makeRequestPreset`), i.e. the preset number as two 7-bit bytes. `45 00 00` = current preset (edit buffer); `45 00 nn` = stored preset *nn*, without loading it. Reply: header `20` (with the name) + five data packets `21`; past the last stored preset `34 02 00 00`. | **confirmed** (presets 1–112, numbers as in 0x2A4) |
 | `46` | 2 | → dev | Sibling of `45` (same helpers); probably another preset request variant. | likely |
 | `50` | 2 | → dev | **Delete preset** `bank num` (editor: `makeDeletePreset`). | editor |
 | `57` | 2 | → dev | **Sync session**: `00 00` begin, `00 01` end. Wraps setup and preset reads and writes. | confirmed |
@@ -63,6 +63,7 @@ Parameter IDs, names and ranges: `data/params-1.4.00.csv`.
 - **Number:** parameter **0x2A4** (unnamed, 0–65535). The preset loader (`func_444889`) stores the loaded preset's number there through the central setter, so `47 05 24` returns it. Read only; setting it has not been tried.
 - **Name:** `45 00 00` (request preset 0 = the current edit buffer). The unit replies with a preset header `20` followed by the preset's data packets (`21`). Header payload (24 bytes): `00 00` preset 0, `01 0C` (0x8C), **15 name bytes** (ASCII; the name ends at the first `00`, and bytes after it are leftovers from the previously loaded name, so cut there), 4-byte flags word X:3F2A (bit 0 = Favorite), `01`. The name is bytes 11–25 of the whole message.
 - `tools/pa-remote.html` reads 0x2A4 on every poll and asks for the name only when the number changes. **Name: confirmed on the unit.** Number: not yet checked for an off-by-one.
+- **Any stored preset:** `45 <n hi> <n lo>` sends preset *n* (header `20` + five `21`) without loading it, so all names can be read without stepping through the presets (about 5 s for 112 presets over USB). The numbers are the ones 0x2A4 reports. Past the last preset the unit answers `34 02 00 00`. *Presets and backup* in the Remote uses this for the preset list, the name preload and the preset backup.
 
 
 ## Parameter ID ranges

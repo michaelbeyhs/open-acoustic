@@ -33,7 +33,7 @@ Status 2026-11-13. "Confirmed" = seen on the unit; everything else is from the f
 
 ## 3. Safety and robustness
 - [ ] **Writes**: only allow parameters that appear in the menus, plus an explicit expert list, instead of a block-list. MIDI CTRL and FILTER locked the pedal out once; SYSEXID 0x27C and MIDI CHAN are candidates too.
-- [ ] **Setup backup before any write session**: read the 7 setup packets (`15`) and save them as a file, with a one-click restore (`13`).
+- [ ] **Setup backup before any write session**: read the 7 setup packets (`15`) and save them as a file (done: Remote, *Presets and backup* ▸ *Back up settings*), with a one-click restore (`13`, still open).
 - [ ] **Auto-recover after power cycle / reconnect**: re-identify on the port state change and show a clear "pedal not answering" state.
 - [ ] **Polling**: fewer round trips (read only changed or visible cells, back off when idle).
 
@@ -44,9 +44,9 @@ Status 2026-11-13. "Confirmed" = seen on the unit; everything else is from the f
   - Several parameters per controller.
 - [ ] **Stand-alone bridge** (Python or Node, no browser) for live use, with the same mapping file.
 - [ ] **Preset librarian**:
-  - list all presets with names (`45 bank num`);
-  - back up to file and restore (`20`/`21`);
-  - rename.
+  - [x] list all presets with names (`45 bank num`; Remote, *Presets and backup*);
+  - [x] back up to file (the `20`/`21` replies as a `.syx`);
+  - [ ] restore (`20`/`21`) and rename.
 
   The factory reset showed why backups matter.
 - [ ] **Snapshots and morphing**: save a set of parameter values and recall or crossfade between them live.

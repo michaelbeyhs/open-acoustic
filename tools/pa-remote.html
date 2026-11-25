@@ -54,6 +54,9 @@ input[type=range] { width: 100%; margin: 12px 0 8px; accent-color: var(--accent)
 .log { font-family: var(--mono); font-size: 12.5px; height: 220px; overflow: auto; background: var(--bg); border: 1px solid var(--rule); border-radius: 6px; padding: 8px 10px; white-space: pre; }
 .log .in { color: var(--ok); } .log .out { color: var(--muted); }
 .callist { display: flex; flex-direction: column; gap: 4px; margin-top: 8px; }
+.presetlist { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 2px 14px; font-family: var(--mono); font-size: 12.5px; }
+.presetlist span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.presetlist b { display: inline-block; min-width: 3.2em; color: var(--muted); font-weight: normal; }
 .calrow { display: flex; align-items: center; gap: 8px; font-size: 13px; padding: 4px 8px; background: var(--bg); border: 1px solid var(--rule); border-radius: 6px; }
 .calrow .raw { font-family: var(--mono); color: var(--muted); min-width: 52px; }
 .calrow .shown { flex: 1; font-weight: 600; }
@@ -216,7 +219,7 @@ button, .soft, .hwbtn, .fsw, .cell, .fxcell, .fxstyle { touch-action: manipulati
           <select id="inSel" aria-label="MIDI in (from the pedal)" title="MIDI in (from the pedal)"><option>—</option></select>
           <button id="connectBtn">Connect</button>
           <label style="display:flex;gap:4px;align-items:center;font-size:12px;color:var(--muted)" title="Tick this when connecting through a Bluetooth MIDI adapter (e.g. WIDI). The adapter answers the identity request itself, so the pedal check is made tolerant and won't block the connection. Auto-ticked if a WIDI/Bluetooth port is detected."><input type="checkbox" id="bleMode"> Using Bluetooth adapter</label>
-          <label style="display:flex;gap:4px;align-items:center;font-size:12px;color:var(--muted)" title="After connecting, step the pedal through every preset once to read and cache all their names, so switching presets is always instant. The pedal has no way to read a preset by number, so it must briefly cycle through them (it returns to where it started). Takes a little while and the pedal will change sound as it goes."><input type="checkbox" id="preload"> Preload all names</label>
+          <label style="display:flex;gap:4px;align-items:center;font-size:12px;color:var(--muted)" title="After connecting, read every stored preset's name once (SysEx 45, a few seconds over USB), so switching presets always shows the name at once. The pedal stays on its current preset."><input type="checkbox" id="preload"> Preload all names</label>
         </span>
         <button id="portsBtn" class="ghost" hidden title="Choose MIDI ports">Ports ▾</button>
         <span id="status" class="status">Not connected</span>
@@ -302,6 +305,18 @@ button, .soft, .hwbtn, .fsw, .cell, .fxcell, .fxstyle { touch-action: manipulati
     </div>
     <details style="margin-top:12px"><summary class="muted">Parameters still needing a unit (<span id="calTodoN">0</span>) — click to jump</summary><div id="calTodo" class="callist" style="margin-top:8px"></div></details>
     <textarea id="calOut" readonly class="calout" placeholder="Captured data shows here as JSON. Copy for Claude copies it; you can also select it here."></textarea>
+  </details>
+
+  <details class="card" id="bakCard">
+    <summary class="cardsum"><strong>Presets and backup</strong><span class="muted">list all presets, save presets and settings to a file</span><span id="bakStatus" class="status">—</span></summary>
+    <p class="panelhint">Reads only: the pedal stays on its preset and nothing on it is changed. The files hold the pedal's own SysEx (preset header <code>20</code> + data <code>21</code>, setup <code>13</code>), as it sends them. Restoring them isn't built in yet.</p>
+    <div class="btns">
+      <button id="bakList">Read preset list</button>
+      <button id="bakPresets">Back up all presets (.syx)</button>
+      <button id="bakSetup">Back up settings (.syx)</button>
+      <button id="bakStop" hidden>Stop</button>
+    </div>
+    <div id="bakTable" class="callist presetlist"></div>
   </details>
 
   <details class="card" id="monCard">
@@ -721,33 +736,103 @@ async function fastPreset() {
   try { await ensureId(); await readPreset(); renderPanel(); if (!isHome()) setTimeout(() => pollPanel(true), 300); }   // on home there's nothing more to refresh
   catch (_) {} finally { fastBusy = false; }
 }
-// Optional: cache EVERY preset's name up front. The pedal can't be asked for a preset by number, so the only way
-// is to step through them all (inject preset-advance events), read each name, and return to where we started.
-const waitNumChange = async prev => { for (let t = 0; t < 8; t++) { await delay(130); const n = await panelRead(0x2A4); if (n != null && n !== prev) return n; } return null; };
+// ── Stored presets by number (SysEx 45) ──
+// 45 <n hi> <n lo> makes the pedal send stored preset n (header 20 with its name, then five data packets 21) without
+// loading it. 45 00 00 is the edit buffer (the current preset); past the last stored preset it answers 34 02 00 00.
+// Checked on a unit: presets 1–112, numbers as in 0x2A4, the current preset stays as it is.
+const presetName = m => { const raw = [...m.slice(11, 26)], end = raw.indexOf(0);
+  return String.fromCharCode(...(end < 0 ? raw : raw.slice(0, end)).filter(c => c >= 0x20 && c < 0x7F)).trim(); };
+// Resolves to { n, name, msgs } for a stored preset, null past the last one, undefined if the pedal didn't answer.
+async function readStoredPreset(n) {
+  const hi = (n >> 7) & 0x7F, lo = n & 0x7F, ble = !!($("bleMode") && $("bleMode").checked);
+  const mine = m => m[0] === 0xF0 && m[3] === 0x38 && ((m[6] === 0x20 && m[7] === hi && m[8] === lo) || m[6] === 0x21 || m[6] === 0x34);
+  const got = { header: false };
+  const p = collect(ble ? 2500 : 800, 6, m => mine(m) && (m[6] !== 0x21 || got.header));   // data packets only after our header
+  const watch = m => { if (m[0] === 0xF0 && m[3] === 0x38 && m[6] === 0x20 && m[7] === hi && m[8] === lo) got.header = true; };
+  sysexWaiters.add(watch);
+  out.send([...hdr(), 0x45, hi, lo, 0xF7]);
+  const r = await p; sysexWaiters.delete(watch);
+  if (r.length && r[0][6] === 0x34) return null;
+  const head = r.find(m => m[6] === 0x20); if (!head) return undefined;
+  const data = r.filter(m => m[6] === 0x21);
+  return { n, name: presetName(head), msgs: [head, ...data], complete: data.length === 5 };
+}
+// Background reads (polling, the fast preset read) also ask for presets and values: pause them while we walk the list.
+let walking = false, walkStop = false;
+async function exclusive(fn) {
+  if (walking) return;
+  walking = true; walkStop = false;
+  for (let i = 0; i < 100 && (polling || fastBusy); i++) await delay(30);
+  polling = true; fastBusy = true;
+  try { await ensureId(); return await fn(); } finally { polling = false; fastBusy = false; walking = false; }
+}
+// Every stored preset from 1 up, until the pedal says there are no more. onEach(preset, n) reports progress.
+async function readAllPresets(onEach) {
+  const all = [];
+  for (let n = 1, misses = 0; n < 1000 && !walkStop; n++) {
+    const p = await readStoredPreset(n);
+    if (p === null) break;
+    if (p === undefined) { if (++misses >= 3) throw new Error(`no answer for preset ${n}`); n--; continue; }
+    misses = 0; all.push(p); presetNames[n] = p.name; onEach && onEach(p, n);
+  }
+  return all;
+}
+// Optional: cache every preset's name up front, read by number (the pedal doesn't change preset).
 async function preloadNames() {
   if (preloading || !out || !inp) return;
   preloadedSession = true; preloading = true;
   const s = $("status"); const say = (t, cls) => { s.textContent = t; s.className = "status" + (cls ? " " + cls : ""); };
   try {
-    await ensureId();
-    for (let i = 0; i < 3; i++) { await pressButton(BTN.back); await delay(90); }   // exit any menu → the pedal's preset screen, where ◀▶ step presets
-    pnl.page = "PRESET"; pnl.sub = 0; advReturn = null; fetchGen++; renderPanel();
-    const start = await panelRead(0x2A4); if (start == null) { say("Preload: couldn't read the preset", "bad"); return; }
-    const seen = new Set([start]); pnl.preset = start; await readPreset();   // cache the starting one
-    let cur = start;
-    for (let i = 0; i < 1000 && preloading; i++) {
-      await press(EVT.arrowNext);            // step to the next preset
-      const n = await waitNumChange(cur);
-      if (n == null || seen.has(n)) { cur = n ?? cur; break; }   // stepping stopped or wrapped back → done
-      seen.add(n); cur = n; pnl.preset = n; await readPreset();
-      say(`Preloading preset names… ${seen.size}`);
-    }
-    for (let i = 0; i < 1000 && cur !== start; i++) { await press(EVT.arrowPrev); const n = await waitNumChange(cur); if (n == null) break; cur = n; }   // walk back to the start preset
-    pnl.preset = cur; preloading = false; await fastPreset();
-    say(`Preloaded ${seen.size} preset names — switching is now instant`, "ok");
-  } catch (_) { say("Preload interrupted", "bad"); }
-  finally { preloading = false; renderPanel(); }
+    const all = await exclusive(() => readAllPresets((_, n) => say(`Reading preset names… ${n}`)));
+    if (all) say(`Read ${all.length} preset names: switching shows names at once`, "ok");
+  } catch (e) { say("Reading preset names stopped: " + e.message, "bad"); }
+  finally { preloading = false; pollPanel(true); renderPanel(); }
 }
+function download(name, msgs) {
+  const bytes = new Uint8Array(msgs.reduce((a, m) => a + m.length, 0)); let o = 0;
+  for (const m of msgs) { bytes.set(m, o); o += m.length; }
+  const a = document.createElement("a"); a.href = URL.createObjectURL(new Blob([bytes], { type: "application/octet-stream" }));
+  a.download = name; document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+}
+const today = () => new Date().toISOString().slice(0, 10);
+const esc = t => t.replace(/[&<>]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" })[c]);
+function bakSay(t, cls) { $("bakStatus").textContent = t; $("bakStatus").className = "status" + (cls ? " " + cls : ""); }
+async function presetsJob(save) {
+  if (!out || !inp) { bakSay("Connect MIDI first", "bad"); return; }
+  $("bakStop").hidden = false; $("bakTable").innerHTML = "";
+  try {
+    const all = await exclusive(() => readAllPresets((p, n) => {
+      bakSay(`Reading preset ${n}…`);
+      $("bakTable").insertAdjacentHTML("beforeend", `<span title="${esc(p.name)}"><b>${n}</b>${esc(p.name) || "—"}</span>`);
+    }));
+    if (!all) return;
+    const partial = all.filter(p => !p.complete).map(p => p.n);
+    if (save) download(`play-acoustic-presets-${today()}.syx`, all.flatMap(p => p.msgs));
+    bakSay(`${all.length} presets${walkStop ? " (stopped)" : ""}${save ? ", saved" : ""}${partial.length ? `; incomplete: ${partial.join(", ")}` : ""}`, partial.length || walkStop ? "bad" : "ok");
+    log(`Read ${all.length} stored presets (SysEx 45)${save ? " and saved them" : ""}`, "in");
+  } catch (e) { bakSay("Stopped: " + e.message, "bad"); }
+  finally { $("bakStop").hidden = true; }
+}
+// Settings: 15 00 → seven setup packets 13 01 2A <chunk 0–6> … (the global setup block, read without a sync session).
+async function setupJob() {
+  if (!out || !inp) { bakSay("Connect MIDI first", "bad"); return; }
+  try {
+    const r = await exclusive(async () => {
+      const p = collect(2500, 7, m => m[0] === 0xF0 && m[3] === 0x38 && m[6] === 0x13 && m[7] === 0x01 && m[8] === 0x2A);
+      out.send([...hdr(), 0x15, 0x00, 0xF7]);
+      return p;
+    });
+    if (!r) return;
+    const chunks = r.map(m => m[9]).sort();
+    if (r.length !== 7 || chunks.join() !== "0,1,2,3,4,5,6") { bakSay(`Got ${r.length} of 7 setup packets: not saved`, "bad"); return; }
+    download(`play-acoustic-settings-${today()}.syx`, [...r].sort((a, b) => a[9] - b[9]));
+    bakSay("Settings saved (7 packets)", "ok"); log("Read the setup block (SysEx 15) and saved it", "in");
+  } catch (e) { bakSay("Failed: " + e.message, "bad"); }
+}
+$("bakList").onclick = () => presetsJob(false);
+$("bakPresets").onclick = () => presetsJob(true);
+$("bakSetup").onclick = () => setupJob();
+$("bakStop").onclick = () => { walkStop = true; };
 let polling = false;
 async function pollPanel(force) {
   if (polling || !out || !inp || portRejected) return;
