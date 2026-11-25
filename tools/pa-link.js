@@ -94,9 +94,12 @@
 
   // ── commands ────────────────────────────────────────────────────────────
   const hdr = () => [0xF0, 0x00, 0x01, 0x38, L.ch, L.pid];
-  L.isBlocked = id => BLOCKED.has(id);
+  // Writes go through the allow-list in pa-writes.js; without it nothing is written.
+  L.canWrite = id => !BLOCKED.has(id) && !!(window.PA_WRITES && window.PA_WRITES.allowed(id));
+  L.isBlocked = id => !L.canWrite(id);
   L.set = (id, v) => {
-    if (!L.ready || BLOCKED.has(id)) return false;
+    if (!L.ready) return false;
+    if (!L.canWrite(id)) { console.warn("pa-link: not written:", window.PA_WRITES ? window.PA_WRITES.why(id) : "pa-writes.js not loaded"); return false; }
     L.out.send([...hdr(), 0x22, (id >> 7) & 0x7F, id & 0x7F, ...enc28(Math.round(v)), 0xF7]); return true;
   };
   // Reads go one at a time: the pedal answers in order and a BLE link chokes on bursts.

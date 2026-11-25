@@ -54,7 +54,7 @@ Below the panel there's a **live parameter control** (any parameter by name or I
 iOS/iPadOS browsers (all WebKit) have **no Web MIDI**. Use a **Web MIDI browser app** that adds Web MIDI with SysEx, connect the pedal through a USB adapter, and open the page from a URL. The panel is touch‑friendly and sized for a tablet.
 
 > ### ⚠️ Safety
-> - The Remote **refuses** to change **MIDI CTRL (`0x278`)** and **FILTER (`0x27B`)**. Either can make the pedal ignore USB SysEx after the next power‑up, and there is no MIDI socket to undo it.
+> - The tools only change parameters from the pedal's own menu pages (plus a short expert list, `tools/pa-writes.js`), and **never** **MIDI CTRL (`0x278`)** or **FILTER (`0x27B`)**. Either can make the pedal ignore USB SysEx after the next power‑up, and there is no MIDI socket to undo it.
 > - **Factory reset** (if ever needed): hold **STORE + BACK** while powering on. It erases settings **and your presets/favorites** — back those up first.
 
 ## What works today

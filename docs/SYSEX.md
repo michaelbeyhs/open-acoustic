@@ -78,7 +78,7 @@ Parameter IDs, names and ranges: `data/params-1.4.00.csv`.
 | 0x27C | SYSEXID (0–127) | Changes the channel byte; harmless with the `7F` wildcard, but avoid. |
 | 0x279 / 0x27A | MIDI CHAN / CC CHAN | Not dangerous for SysEx, but no use either (the AVR drops channel messages). |
 
-The remote refuses 0x278 and 0x27B.
+The tools only write parameters on an allow-list (`tools/pa-writes.js`): the cells of the pedal's own menu pages (`tools/pa-menus.js`) plus a short expert list (HIT, the SET TIME delay times, the effect sends). 0x278, 0x27B, 0x27C, 0x279 and 0x27A are never written. Everything else can still be read.
 
 ## Fake front-panel presses (SysEx 55) and preset up/down (confirmed)
 - `55 01 01 00 00 00` switches the tunnel on. The pedal then reports every front-panel event as `55 <28-bit>` (event = `e0 e1 e2`), and accepts `55 02 <28-bit e0<<16|e1<<8|e2>` to inject one.

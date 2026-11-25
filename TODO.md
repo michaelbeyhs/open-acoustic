@@ -23,16 +23,14 @@ Status 2026-11-13. "Confirmed" = seen on the unit; everything else is from the f
   - MP75 CONTROL (0x88), LCD CONTRAST.
 
   Decode the formatter (descriptor word 12) the same way as the value-name table.
-- [ ] **Preset up/down, STORE, FAVORITE, GENRE**: not mapped. The SysEx `55` panel tunnel didn't work. Next ideas:
-  - find the preset-load path (`func_444889`) reachable from SysEx;
-  - or test whether writing 0x2A4 loads a preset.
+- [x] **Preset up/down, STORE**: done with the SysEx `55` panel tunnel (injected button/footswitch events, confirmed on the unit; see `docs/SYSEX.md`). FAVORITE and GENRE are the `DB 00` / `DB 01` soft buttons.
 - [ ] **Screens not mirrored**: tuner, looper status, HIT/TALK, pop-up messages, genre/favorite lists.
 - [ ] **Product Info page**: fill in the firmware version from the identity reply.
 - [ ] **Pixel-exact LCD**: the fonts are decoded (§16), so the panel could draw with the pedal's own fonts at 128×64 instead of approximating with CSS.
 - [ ] **Unnamed parameters**: the "Any parameter" list still only covers 0x000–0x2BF. Add 0x2C0–0x3B3, plus names for the ~600 unnamed preset internals.
 
 ## 3. Safety and robustness
-- [ ] **Writes**: only allow parameters that appear in the menus, plus an explicit expert list, instead of a block-list. MIDI CTRL and FILTER locked the pedal out once; SYSEXID 0x27C and MIDI CHAN are candidates too.
+- [x] **Writes**: only allow parameters that appear in the menus, plus an explicit expert list, instead of a block-list (`tools/pa-writes.js`, used by the Remote and `pa-link.js`). MIDI CTRL, FILTER, SYSEXID and MIDI/CC CHAN are never written.
 - [ ] **Setup backup before any write session**: read the 7 setup packets (`15`) and save them as a file, with a one-click restore (`13`).
 - [ ] **Auto-recover after power cycle / reconnect**: re-identify on the port state change and show a clear "pedal not answering" state.
 - [ ] **Polling**: fewer round trips (read only changed or visible cells, back off when idle).

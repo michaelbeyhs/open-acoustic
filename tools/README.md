@@ -26,7 +26,7 @@ See `verify.html` for the current, item-by-item status. In short:
   - preset up/down footswitches;
   - STORE, FAVORITE, GENRE;
   - tuner and looper screens.
-- **Refused on purpose:** MIDI CTRL (0x278) and FILTER (0x27B), which can lock out USB control (factory reset needed: hold STORE + BACK at power-on, which erases your presets).
+- **Writes are allow-listed** (`pa-writes.js`): only the parameters on the pedal's menu pages plus a short expert list can be changed; the rest of the "Any parameter" list is read only. MIDI CTRL (0x278) and FILTER (0x27B), which can lock out USB control (factory reset needed: hold STORE + BACK at power-on, which erases your presets), are never written, nor SYSEXID and the MIDI/CC channels. To write another parameter, add it to `EXPERT` in `pa-writes.js` once it is known to be harmless.
 
 ## Files
 | File | What |

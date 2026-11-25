@@ -314,6 +314,7 @@ button, .soft, .hwbtn, .fsw, .cell, .fxcell, .fxstyle { touch-action: manipulati
 <div class="pickerWrap" id="pickerWrap"><div class="lcdPicker" id="lcdPicker" role="listbox"></div></div>
 
 <script src="pa-menus.js"></script>
+<script src="pa-writes.js"></script>
 <script src="pa-images.js"></script>
 <script>
 let access = null, out = null, inp = null;
@@ -394,13 +395,15 @@ const QUICK = [];
 // MIDI CTRL = MIDI or FILTER = SYSEX makes the pedal ignore USB SysEx after the next power cycle, and the Play Acoustic
 // has no 5-pin MIDI socket to undo it (only a factory initialisation recovers).
 const BLOCKED = new Set([0x95,0x96,0x97,0x98,0x26D,0x26E,0x278,0x27B]);
+// Writes only go to parameters on the allow-list (pa-writes.js: the menu pages plus a short expert list); the rest can be read.
+const canWrite = id => !BLOCKED.has(id) && !!(window.PA_WRITES && PA_WRITES.allowed(id));
 let identified = false, cur = null, lastSend = 0, sendTimer = null;
 const pById = new Map(PARAMS.map(r => [r[0], r]));
 function fillParams(filter) {
   const sel = $("pSel"), f = (filter || "").trim().toLowerCase(), keep = sel.value; sel.innerHTML = "";
   for (const [id, name, lo, hi] of PARAMS) {
     if (BLOCKED.has(id) || lo === hi) continue;
-    const label = `0x${id.toString(16).toUpperCase().padStart(3, "0")}  ${name || "(unnamed)"}  [${lo}…${hi}]`;
+    const label = `0x${id.toString(16).toUpperCase().padStart(3, "0")}  ${name || "(unnamed)"}  [${lo}…${hi}]${canWrite(id) ? "" : "  (read only)"}`;
     if (f && !label.toLowerCase().includes(f)) continue;
     sel.add(new Option(label, String(id)));
   }
@@ -415,7 +418,8 @@ function selectParam(id) {
   if (![...$("pSel").options].some(o => +o.value === id)) { $("pFilter").value = ""; fillParams(""); }
   $("pSel").value = String(id);
   const sl = $("pSlider"); sl.min = r[2]; sl.max = r[3]; sl.step = 1;
-  $("pInfo").textContent = `0x${id.toString(16).toUpperCase()} ${r[1] || "(unnamed)"}  range ${r[2]}…${r[3]}`;
+  $("pInfo").textContent = `0x${id.toString(16).toUpperCase()} ${r[1] || "(unnamed)"}  range ${r[2]}…${r[3]}${canWrite(id) ? "" : "  · read only: " + (window.PA_WRITES ? PA_WRITES.why(id) : "pa-writes.js not loaded")}`;
+  sl.disabled = !canWrite(id);
   $("pVal").textContent = "—";
   if (out && inp) getParam(id);
 }
@@ -424,9 +428,10 @@ async function ensureId() { if (identified) return; idPromise ??= identify().fin
   // Switch the front-panel event tunnel on right away, so the pedal echoes its own knob/button events ("panel event" in the monitor).
   if (!tunnelReady) { out.send([...hdr(), 0x55, 0x01, 0x01, 0x00, 0x00, 0x00, 0xF7]); tunnelReady = true; log("→ front-panel event tunnel on (55 01 01)", "out"); } }
 function setParam(id, v) {
-  if (id === 0x278 || id === 0x27B) { log(`(refused: 0x${id.toString(16)} would lock out USB SysEx)`, "out"); return; }
+  if (!canWrite(id)) { log(`(not sent: ${window.PA_WRITES ? PA_WRITES.why(id) : "pa-writes.js not loaded"})`, "out"); return false; }
   const m = [...hdr(), 0x22, (id >> 7) & 0x7F, id & 0x7F, ...enc28(v), 0xF7]; out.send(m);
   log(`→ SET 0x${id.toString(16)} = ${v}   (${m.map(x => x.toString(16).padStart(2, "0")).join(" ")})`, "out");
+  return true;
 }
 async function getParam(id, quiet) {
   try {
@@ -445,7 +450,8 @@ async function push(v) {
   if (!cur || !out) { $("liveStatus").textContent = "Connect MIDI and pick a parameter"; $("liveStatus").className = "status bad"; return; }
   await ensureId();
   v = Math.max(cur[2], Math.min(cur[3], Math.round(v)));
-  $("pVal").textContent = v; setParam(cur[0], v);
+  if (!setParam(cur[0], v)) { $("liveStatus").textContent = `Not sent: 0x${cur[0].toString(16)} is read only here`; $("liveStatus").className = "status bad"; return; }
+  $("pVal").textContent = v;
   $("liveStatus").textContent = `Sent 0x${cur[0].toString(16)} = ${v}`; $("liveStatus").className = "status";
   if ($("pReadBack").checked) { clearTimeout(sendTimer); sendTimer = setTimeout(() => getParam(cur[0]), 250); }
 }
