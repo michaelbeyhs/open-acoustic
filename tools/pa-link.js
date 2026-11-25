@@ -58,14 +58,28 @@
     if (!navigator.requestMIDIAccess) { say("nomidi", "No Web MIDI in this browser (iPad: use a Web MIDI browser app)"); return false; }
     try { L.access = await navigator.requestMIDIAccess({ sysex: true }); }
     catch (e) { say("off", auto ? "Not connected" : "MIDI access refused: " + e.message); return false; }
-    L.access.onstatechange = () => { emit("ports", L.ports()); if (!L.out || !L.inp || L.out.state === "disconnected") autoPick(); };
+    L.access.onstatechange = e => {
+      emit("ports", L.ports());
+      const p = e && e.port, ours = p && ((L.out && p.id === L.out.id) || (L.inp && p.id === L.inp.id));
+      // The pedal was switched off or unplugged: show it, and pick it up again when it comes back.
+      if (ours && p.state === "disconnected" && L.ready) { L.ready = false; say("connecting", "Pedal disconnected: waiting for it to come back…"); }
+      // Ports come and go one at a time (input, then output): settle before picking.
+      clearTimeout(repickT); repickT = setTimeout(() => { if (!L.ready || !connected(L.out) || !connected(L.inp)) autoPick(); }, 300);
+    };
     autoPick(); return true;
   };
+  let repickT = null;
+  const connected = p => !!p && p.state !== "disconnected";
   function autoPick() {
     const saved = store.get("pa-ports") || {};
     const pick = (list, savedId) => list.find(p => p.id === savedId) || list.find(p => PA_PORT.test(p.name)) || list.find(p => BLE_PORT.test(p.name)) || null;
-    const { outputs, inputs } = L.ports(), o = pick(outputs, saved.out), i = pick(inputs, saved.inp);
-    if (!o || !i) { say("off", outputs.length ? "Choose the Play Acoustic's MIDI ports" : "No MIDI ports: connect the pedal by USB"); emit("ports", L.ports()); return; }
+    // only ports that are there now (a switched-off pedal's ports stay listed as "disconnected")
+    const live = m => [...m.values()].filter(connected).map(p => ({ id: p.id, name: p.name }));
+    const outputs = live(L.access.outputs), inputs = live(L.access.inputs), o = pick(outputs, saved.out), i = pick(inputs, saved.inp);
+    if (!o || !i) {
+      if (L.status === "connecting" && L.out) return;   // our pedal went away: keep waiting for it
+      say("off", outputs.length ? "Choose the Play Acoustic's MIDI ports" : "No MIDI ports: connect the pedal by USB"); emit("ports", L.ports()); return;
+    }
     L.use(o.id, i.id, saved.ble ?? (BLE_PORT.test(o.name) || BLE_PORT.test(i.name)));
   }
   let bindGen = 0;
@@ -86,8 +100,27 @@
     }
     if (gen === bindGen) say("bad", `No Play Acoustic answered on ${L.out.name}`);
   };
+  // A pedal that stops answering while its port stays (power-cycled behind a Bluetooth adapter, or a USB hiccup):
+  // after a few reads without a reply, check it again every few seconds; ready() switches the panel tunnel back on,
+  // which the pedal forgets when it restarts.
+  let misses = 0, recovering = false;
+  function missed() {
+    if (++misses < 3 || !L.ready) return;
+    L.ready = false; say("connecting", "Pedal not answering: checking again…");
+    recover();
+  }
+  async function recover() {
+    if (recovering) return; recovering = true;
+    const outId = L.out && L.out.id, inId = L.inp && L.inp.id;
+    try {
+      while (!L.ready && L.out && L.inp && L.out.id === outId && L.inp.id === inId) {
+        await L.use(outId, inId, L.ble);
+        if (!L.ready) await delay(4000);
+      }
+    } finally { recovering = false; }
+  }
   function ready(name) {
-    L.ready = true; L.name = name;
+    L.ready = true; L.name = name; misses = 0;
     L.out.send([...hdr(), 0x55, 0x01, 0x01, 0x00, 0x00, 0x00, 0xF7]);   // echo the pedal's own panel events to us
     say("ready", name); emit("ready");
   }
@@ -107,6 +140,7 @@
     const p = collect(L.ble ? 1200 : 600, 1, m => m[0] === 0xF0 && m[3] === 0x38 && m[6] === 0x22 && ((m[7] << 7) | m[8]) === id);
     L.out.send([...hdr(), 0x47, (id >> 7) & 0x7F, id & 0x7F, 0xF7]);
     const t0 = performance.now(), r = await p;
+    if (r.length) misses = 0; else missed();
     if (r.length) L.readMs = L.readMs == null ? performance.now() - t0 : L.readMs * .9 + (performance.now() - t0) * .1;   // average round trip
     return r.length ? dec28(r[0], 9) : null;
   });

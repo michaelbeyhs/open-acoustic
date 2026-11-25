@@ -34,7 +34,7 @@ Status 2026-11-13. "Confirmed" = seen on the unit; everything else is from the f
 ## 3. Safety and robustness
 - [ ] **Writes**: only allow parameters that appear in the menus, plus an explicit expert list, instead of a block-list. MIDI CTRL and FILTER locked the pedal out once; SYSEXID 0x27C and MIDI CHAN are candidates too.
 - [ ] **Setup backup before any write session**: read the 7 setup packets (`15`) and save them as a file, with a one-click restore (`13`).
-- [ ] **Auto-recover after power cycle / reconnect**: re-identify on the port state change and show a clear "pedal not answering" state.
+- [x] **Auto-recover after power cycle / reconnect**: re-identify on the port state change and show a clear "pedal not answering" state. Remote and `pa-link.js` (views): a disconnected port shows "waiting for the pedal", a pedal that stops answering on a port that stays (e.g. behind a Bluetooth adapter) is checked again every few seconds, and the panel tunnel is switched back on after it answers.
 - [ ] **Polling**: fewer round trips (read only changed or visible cells, back off when idle).
 
 ## 4. New feature ideas
